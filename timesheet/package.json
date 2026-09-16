@@ -12,7 +12,8 @@
     "start": "node server/index.js",
     "seed": "node scripts/seed.js",
     "test": "node --test tests/*.test.js",
-    "demo": "node demo/build.js"
+    "demo": "node demo/build.js",
+    "backup": "node scripts/backup.js"
   },
   "dependencies": {},
   "license": "UNLICENSED"

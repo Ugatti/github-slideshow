@@ -16,6 +16,7 @@ function buildRouter() {
   require('./routes/entries')(router);
   require('./routes/invoices')(router);
   require('./routes/reports')(router);
+  require('./routes/settings')(router);
   router.get('/api/health', async () => ({ ok: true, firm: config.firm.name }), { auth: false });
   return router;
 }

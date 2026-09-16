@@ -634,6 +634,42 @@
     return { ok: true, releasedEntries: liberados.length };
   }, { role: 'master' });
 
+  /* --- identidade visual --- */
+
+  let marca = {
+    name: 'Azeredo & Ugatti Advogados', tagline: 'Advocacia empresarial',
+    cnpj: '12345678000195', address: 'Av. Paulista, 1000 — cj. 142 — São Paulo/SP',
+    phone: '(11) 3000-0000', email: 'contato@azeredoeugatti.com.br',
+    site: 'azeredoeugatti.com.br', primaryColor: '#0f2033', accentColor: '#a8862f',
+    footerNote: 'Documento gerado eletronicamente pelo sistema de timesheet do escritório.',
+    hasLogo: false,
+  };
+
+  route('GET', '/api/settings/branding', () => ({ branding: marca }));
+
+  route('PUT', '/api/settings/branding', ({ me, body }) => {
+    if (!String(body.name || '').trim()) throw fail(400, 'O campo "nome do escritório" é obrigatório.');
+    for (const campo of ['primaryColor', 'accentColor']) {
+      if (body[campo] && !/^#[0-9a-fA-F]{6}$/.test(body[campo])) {
+        throw fail(400, `"${campo}" deve ser uma cor em hexadecimal, como #0f2033.`);
+      }
+    }
+    marca = { ...marca, ...body, cnpj: onlyDigits(body.cnpj) || '' };
+    audit(me.id, 'update', 'branding', null, { name: marca.name });
+    return { branding: marca };
+  }, { role: 'master' });
+
+  route('POST', '/api/settings/logo', ({ body }) => {
+    if (!/^data:image\/(png|jpeg|jpg);base64,/i.test(String(body.dataUrl || ''))) {
+      throw fail(400, 'Envie um arquivo PNG ou JPEG.');
+    }
+    marca.hasLogo = true;
+    return { ok: true, width: 0, height: 0 };
+  }, { role: 'master' });
+
+  route('DELETE', '/api/settings/logo', () => { marca.hasLogo = false; return { ok: true }; },
+    { role: 'master' });
+
   /* --- relatórios --- */
   const GROUPS = {
     client:  (e) => ({ id: e.clientId, name: e.clientName }),
@@ -684,6 +720,16 @@
   route('GET', '/api/reports/invoice', ({ me, query }) => {
     const client = findClient(query.clientId);
     if (!client) throw fail(400, 'Cliente não encontrado.');
+
+    let projeto = null;
+    if (query.projectId) {
+      projeto = findProject(query.projectId);
+      if (!projeto) throw fail(400, 'Projeto não encontrado.');
+      if (projeto.client_id !== client.id) {
+        throw fail(400, 'O projeto informado não pertence a este cliente.');
+      }
+    }
+
     const entries = filterEntries({ ...query, clientId: String(client.id) }, me)
       .map(expandEntry)
       .sort((a, b) => a.projectName.localeCompare(b.projectName) || a.workDate.localeCompare(b.workDate));
@@ -716,6 +762,7 @@
 
     return {
       client: { id: client.id, name: client.name, document: client.document, email: client.email },
+      project: projeto ? { id: projeto.id, name: projeto.name, code: projeto.code } : null,
       period: { from: query.from, to: query.to },
       generatedAt: nowIso(),
       projects: [...porProjeto.values()].map((p) => ({

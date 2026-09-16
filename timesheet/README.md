@@ -4,9 +4,9 @@ Sistema proprietário de controle de horas: lançamento por cliente e projeto,
 separação entre conta master e contas de profissional, e relatórios com memória
 de cálculo para emissão de nota fiscal de honorários.
 
-A avaliação das alternativas de mercado que levou a este desenvolvimento está em
-[`../docs/AVALIACAO-MERCADO.md`](../docs/AVALIACAO-MERCADO.md); as decisões
-técnicas, em [`../docs/ARQUITETURA.md`](../docs/ARQUITETURA.md).
+- [Avaliação das soluções de mercado](../docs/AVALIACAO-MERCADO.md) — por que construir
+- [Implantação em nuvem](../docs/IMPLANTACAO.md) — como colocar no ar, com backup
+- [Decisões de arquitetura](../docs/ARQUITETURA.md) — por que é assim por dentro
 
 ## Ver funcionando sem instalar nada
 
@@ -96,12 +96,28 @@ padrão de uso é registrar várias atividades seguidas do mesmo caso.
 fiscal. "Reunião" não sustenta um questionamento do cliente; "Reunião com a
 diretoria para definição da estratégia de defesa na reclamatória X" sustenta.
 
-**Fechar o mês.** Em **Nota fiscal**, escolha cliente e período e gere o
-demonstrativo — resumido (por projeto e profissional) ou analítico (com todas as
-atividades). Imprima em PDF para anexar à NF ou exporte em CSV. Em seguida,
-**Fechar período** bloqueia aquelas horas contra edição e exclusão, dando lastro
-ao que foi faturado. O fechamento pode ser reaberto, e a reabertura fica
-registrada na auditoria.
+**Emitir relatórios.** Em **Relatórios em PDF**, escolha:
+
+- **cliente** — obrigatório;
+- **escopo** — todos os projetos do cliente num relatório consolidado, ou
+  somente um projeto, para faturar ou prestar contas em separado;
+- **período** — qualquer intervalo de datas, com atalhos para os meses recentes;
+- **detalhamento** — resumido (por projeto e profissional) ou analítico (com
+  todas as atividades descritas).
+
+**Baixar PDF** gera o arquivo com o papel timbrado do escritório. O nome do
+arquivo identifica cliente, projeto e período, de modo que os relatórios de
+projetos diferentes não se sobrescrevem na pasta. Também há exportação em CSV
+e pré-visualização na tela.
+
+**Papel timbrado.** O botão no topo dessa tela abre o cadastro da identidade
+visual: nome, CNPJ, endereço, contatos, cores e logotipo (PNG ou JPEG, até
+512 KB). É o que aparece no cabeçalho e no rodapé de todo PDF emitido. Como o
+cadastro fica no banco, mudar o logotipo não exige alterar código.
+
+**Fechar o mês.** Depois de emitir, **Fechar período** bloqueia aquelas horas
+contra edição e exclusão, dando lastro ao que foi faturado. O fechamento pode
+ser reaberto, e a reabertura fica registrada na auditoria.
 
 ## Cálculo de valores
 
@@ -123,32 +139,39 @@ evita a divergência de centavos que aparece ao somar valores já arredondados.
 
 ```bash
 npm start      # sobe o servidor (PORT, default 3000)
-npm test       # 42 testes (integração + unidade)
+npm test       # 59 testes (API, unidade e geração de PDF)
 npm run seed   # dados de demonstração no banco
 npm run demo   # gera o HTML único de demonstração
+npm run backup # instantâneo do banco, com o sistema no ar
 ```
 
 ### Backup
 
-Todo o sistema é um arquivo: `data/timesheet.db`. Com o servidor parado, copiar
-esse arquivo é o backup completo. Com o servidor no ar, copie também
-`timesheet.db-wal` e `timesheet.db-shm`. **Programe uma cópia diária para fora
-do servidor** — é o único ponto de falha que apaga o histórico de faturamento.
+```bash
+npm run backup                 # grava em ./backups
+npm run backup -- /mnt/nas --keep=60
+```
+
+Usa `VACUUM INTO`, que o SQLite executa dentro de uma transação: o arquivo sai
+íntegro **com o sistema no ar**. Copiar o `.db` com `cp` durante o uso pode
+capturar um estado parcial — por isso o script existe.
+
+**Programe uma cópia diária para fora do servidor.** O histórico de faturamento
+é o único dado aqui que não se reconstrói. `deploy/backup-diario.sh` faz o
+backup e tem a seção de envio externo (rclone) pronta para descomentar.
 
 ### Colocar em produção
 
-O sistema não termina TLS sozinho. Em rede pública, coloque-o atrás de um proxy
-HTTPS (nginx, Caddy, Cloudflare Tunnel) e defina:
+Veja [`../docs/IMPLANTACAO.md`](../docs/IMPLANTACAO.md) — recomendação de
+hospedagem, passo a passo e backup. Em resumo: `deploy/` traz `Dockerfile`,
+`docker-compose.yml` e `Caddyfile` que sobem o sistema com HTTPS automático, e
+`timesheet.service` para quem preferir systemd sem Docker.
 
-```bash
-SECURE_COOKIES=true
-SESSION_SECRET=<48 bytes aleatórios em hex>
-```
-
-Gere o segredo com
-`node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
-Sem `SESSION_SECRET`, o sistema gera um e guarda no banco — funciona, mas
-mantê-lo fora do banco é melhor prática.
+O sistema não termina TLS sozinho: em rede pública ele vai **atrás de um proxy
+HTTPS**, com `SECURE_COOKIES=true` e um `SESSION_SECRET` fixo. Gere o segredo
+com `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
+Sem ele, o sistema gera um e guarda no banco — funciona, mas mantê-lo fora do
+banco é melhor prática.
 
 ## Segurança
 
@@ -183,6 +206,9 @@ política de retenção e o encarregado de dados, se aplicável.
 ```
 timesheet/
 ├── server/
+│   ├── pdf/                gerador de PDF próprio (document, encoding, image)
+│   ├── reports-pdf.js      o relatório timbrado montado sobre o gerador
+│   ├── branding.js         identidade visual do escritório
 │   ├── schema.sql          esquema do banco, comentado
 │   ├── db.js               conexão, transações, configurações
 │   ├── auth.js             senhas, sessões, bloqueio por tentativas
@@ -194,7 +220,8 @@ timesheet/
 │   ├── app.js              montagem do app e bootstrap da conta master
 │   └── routes/             auth, users, clients, projects, entries, invoices, reports
 ├── public/                 interface (index.html, app.js, styles.css)
+├── deploy/                 Docker, Caddy, systemd e backup diário
 ├── demo/                   empacotador do HTML único + backend simulado
-├── scripts/seed.js         dados de demonstração
-└── tests/                  42 testes (api.test.js + unit.test.js)
+├── scripts/                seed e backup
+└── tests/                  59 testes (api, unidade e PDF)
 ```

@@ -1,0 +1,44 @@
+# Sobe o sistema atrás de um proxy com HTTPS automático.
+#   cd timesheet/deploy && cp .env.example .env && nano .env && docker compose up -d
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      SESSION_SECRET: "${SESSION_SECRET:?defina SESSION_SECRET no arquivo .env}"
+      SECURE_COOKIES: "true"
+      SESSION_TTL_HOURS: "${SESSION_TTL_HOURS:-12}"
+      BOOTSTRAP_MASTER_NAME: "${BOOTSTRAP_MASTER_NAME:-Administrador}"
+      BOOTSTRAP_MASTER_EMAIL: "${BOOTSTRAP_MASTER_EMAIL:?defina o e-mail da conta master}"
+      BOOTSTRAP_MASTER_PASSWORD: "${BOOTSTRAP_MASTER_PASSWORD:-}"
+      FIRM_NAME: "${FIRM_NAME:-Azeredo & Ugatti Advogados}"
+      TZ: America/Sao_Paulo
+    volumes:
+      - dados:/app/data
+      - ./backups:/app/backups
+    # Sem portas publicadas: só o proxy alcança a aplicação.
+    expose:
+      - "3000"
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: "${DOMAIN:?defina o dominio do sistema, por exemplo timesheet.seuescritorio.com.br}"
+      TZ: America/Sao_Paulo
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-dados:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+volumes:
+  dados:
+  caddy-dados:
+  caddy-config:

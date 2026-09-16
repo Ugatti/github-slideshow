@@ -433,3 +433,204 @@ test('não serve arquivos fora do diretório público', async () => {
     assert.ok(!corpo.includes('DatabaseSync'), `${alvo} vazou código-fonte`);
   }
 });
+
+/* ------------------------------------------------- relatórios em PDF e marca */
+
+test('relatório em PDF por cliente consolida todos os projetos', async () => {
+  const res = await fetch(
+    `${server.base}/api/reports/pdf?${new URLSearchParams({
+      clientId: String(clientId), from: daysAgo(30), to: today(),
+    })}`,
+    { headers: { cookie: master.cookie } }
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'application/pdf');
+  assert.match(res.headers.get('content-disposition'), /attachment; filename=".*\.pdf"/);
+
+  const pdf = Buffer.from(await res.arrayBuffer());
+  assert.ok(pdf.subarray(0, 8).toString().startsWith('%PDF-1.'));
+  assert.ok(pdf.toString('latin1').trimEnd().endsWith('%%EOF'));
+  assert.ok(pdf.length > 1500, `PDF suspeito de estar vazio: ${pdf.length} bytes`);
+});
+
+test('relatório em PDF por projeto isola apenas aquele projeto', async () => {
+  // Fixture própria: outros testes movem lançamentos entre projetos, então este
+  // não pode depender do estado acumulado da suíte.
+  const cli = await master.post('/api/clients', { name: 'Transportes Aurora Ltda.' });
+  const id = cli.body.client.id;
+  const alfa = (await master.post('/api/projects', {
+    clientId: id, name: 'Recuperação Judicial', code: 'RJ-2026-07', defaultRate: '600,00',
+  })).body.project.id;
+  const beta = (await master.post('/api/projects', {
+    clientId: id, name: 'Consultivo Regulatório', defaultRate: '400,00',
+  })).body.project.id;
+
+  await master.post('/api/entries', {
+    projectId: alfa, workDate: daysAgo(3), duration: '5:00',
+    description: 'Elaboração do plano de recuperação judicial.',
+  });
+  await master.post('/api/entries', {
+    projectId: beta, workDate: daysAgo(3), duration: '2:00',
+    description: 'Parecer sobre exigência regulatória.',
+  });
+
+  const periodo = (extra) => new URLSearchParams({
+    clientId: String(id), from: daysAgo(10), to: today(), ...extra,
+  });
+
+  const doCliente = await master.get(`/api/reports/invoice?${periodo({})}`);
+  assert.equal(doCliente.body.projects.length, 2);
+  assert.equal(doCliente.body.project, null, 'sem projectId o escopo é o cliente inteiro');
+  assert.equal(doCliente.body.totals.minutes, 420);
+  assert.equal(doCliente.body.totals.valueCents, 5 * 60000 + 2 * 40000);
+
+  const doProjeto = await master.get(`/api/reports/invoice?${periodo({ projectId: String(alfa) })}`);
+  assert.equal(doProjeto.body.projects.length, 1);
+  assert.equal(doProjeto.body.project.id, alfa);
+  assert.equal(doProjeto.body.totals.minutes, 300);
+  assert.equal(doProjeto.body.totals.valueCents, 5 * 60000);
+
+  // Os dois relatórios em separado precisam somar exatamente o consolidado.
+  const doOutro = await master.get(`/api/reports/invoice?${periodo({ projectId: String(beta) })}`);
+  assert.equal(
+    doProjeto.body.totals.valueCents + doOutro.body.totals.valueCents,
+    doCliente.body.totals.valueCents
+  );
+
+  // O nome do arquivo identifica o projeto, para não sobrescrever o do cliente.
+  const pdfCliente = await fetch(`${server.base}/api/reports/pdf?${periodo({})}`,
+    { headers: { cookie: master.cookie } });
+  const pdfProjeto = await fetch(`${server.base}/api/reports/pdf?${periodo({ projectId: String(alfa) })}`,
+    { headers: { cookie: master.cookie } });
+  assert.equal(pdfCliente.status, 200);
+  assert.equal(pdfProjeto.status, 200);
+
+  const nomeCliente = pdfCliente.headers.get('content-disposition');
+  const nomeProjeto = pdfProjeto.headers.get('content-disposition');
+  assert.match(nomeCliente, /transportes-aurora/);
+  assert.match(nomeProjeto, /recuperacao-judicial/);
+  assert.notEqual(nomeCliente, nomeProjeto);
+});
+
+test('recusa projeto que não pertence ao cliente informado', async () => {
+  const outro = await master.post('/api/clients', { name: 'Cliente Diverso Ltda.' });
+  const res = await master.get(
+    `/api/reports/invoice?clientId=${outro.body.client.id}&projectId=${projectA}` +
+    `&from=${daysAgo(30)}&to=${today()}`
+  );
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /não pertence/i);
+});
+
+test('PDF de período sem horas é recusado com explicação', async () => {
+  const res = await fetch(
+    `${server.base}/api/reports/pdf?clientId=${clientId}&from=2019-01-01&to=2019-01-31`,
+    { headers: { cookie: master.cookie } }
+  );
+  assert.equal(res.status, 400);
+  const corpo = await res.json();
+  assert.match(corpo.error, /nada a gerar/i);
+});
+
+test('PDF do profissional contém apenas as horas dele', async () => {
+  const meu = await fetch(
+    `${server.base}/api/reports/pdf?clientId=${clientId}&from=${daysAgo(30)}&to=${today()}`,
+    { headers: { cookie: ana.cookie } }
+  );
+  assert.equal(meu.status, 200);
+
+  const doMaster = await master.get(
+    `/api/reports/invoice?clientId=${clientId}&from=${daysAgo(30)}&to=${today()}`);
+  const daAna = await ana.get(
+    `/api/reports/invoice?clientId=${clientId}&from=${daysAgo(30)}&to=${today()}`);
+  assert.ok(daAna.body.totals.minutes < doMaster.body.totals.minutes);
+  for (const projeto of daAna.body.projects) {
+    for (const prof of projeto.professionals) assert.equal(prof.userId, anaUserId);
+  }
+});
+
+test('identidade visual: master edita, profissional apenas lê', async () => {
+  const leitura = await ana.get('/api/settings/branding');
+  assert.equal(leitura.status, 200);
+  assert.ok(leitura.body.branding.name);
+
+  assert.equal((await ana.put('/api/settings/branding', { name: 'Escritório Pirata' })).status, 403);
+
+  const salvo = await master.put('/api/settings/branding', {
+    name: 'Azeredo & Ugatti Advogados', tagline: 'Advocacia empresarial',
+    cnpj: '12.345.678/0001-95', address: 'Av. Paulista, 1000 — São Paulo/SP',
+    phone: '(11) 3000-0000', email: 'contato@azeredoeugatti.com.br',
+    primaryColor: '#0F2033', accentColor: '#A8862F',
+  });
+  assert.equal(salvo.status, 200);
+  assert.equal(salvo.body.branding.cnpj, '12345678000195');
+  assert.equal(salvo.body.branding.primaryColor, '#0f2033');
+
+  // a marca salva precisa sobreviver a uma nova leitura
+  assert.equal((await master.get('/api/settings/branding')).body.branding.tagline,
+    'Advocacia empresarial');
+});
+
+test('recusa cor inválida na identidade visual', async () => {
+  const res = await master.put('/api/settings/branding', {
+    name: 'Azeredo & Ugatti Advogados', accentColor: 'dourado',
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /hexadecimal/i);
+});
+
+test('logotipo: aceita PNG válido e recusa arquivo que não é imagem', async () => {
+  const zlib = require('node:zlib');
+  const crc = (buf) => {
+    let c = ~0;
+    for (const b of buf) { c ^= b; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1)); }
+    return (~c) >>> 0;
+  };
+  const chunk = (tipo, dados) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(dados.length);
+    const td = Buffer.concat([Buffer.from(tipo), dados]);
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const w = 200, h = 60;
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const linhas = [];
+  for (let y = 0; y < h; y++) {
+    const l = Buffer.alloc(1 + w * 3);
+    for (let x = 0; x < w; x++) { l[1 + x * 3] = 15; l[2 + x * 3] = 32; l[3 + x * 3] = 51; }
+    linhas.push(l);
+  }
+  const png = Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(Buffer.concat(linhas))), chunk('IEND', Buffer.alloc(0)),
+  ]);
+
+  const enviado = await master.post('/api/settings/logo', {
+    dataUrl: `data:image/png;base64,${png.toString('base64')}`,
+  });
+  assert.equal(enviado.status, 200, JSON.stringify(enviado.body));
+  assert.equal(enviado.body.width, 200);
+
+  assert.equal((await master.get('/api/settings/branding')).body.branding.hasLogo, true);
+
+  const ruim = await master.post('/api/settings/logo', {
+    dataUrl: 'data:image/png;base64,' + Buffer.from('isto não é um png').toString('base64'),
+  });
+  assert.equal(ruim.status, 400);
+  assert.match(ruim.body.error, /imagem|PNG/i);
+
+  assert.equal((await ana.post('/api/settings/logo', { dataUrl: 'x' })).status, 403);
+
+  // com logotipo cadastrado o PDF continua íntegro
+  const res = await fetch(
+    `${server.base}/api/reports/pdf?clientId=${clientId}&from=${daysAgo(30)}&to=${today()}`,
+    { headers: { cookie: master.cookie } }
+  );
+  assert.equal(res.status, 200);
+  const pdf = Buffer.from(await res.arrayBuffer());
+  assert.match(pdf.toString('latin1'), /\/Subtype \/Image/);
+
+  assert.equal((await master.del('/api/settings/logo')).status, 200);
+  assert.equal((await master.get('/api/settings/branding')).body.branding.hasLogo, false);
+});

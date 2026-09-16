@@ -5,6 +5,9 @@ const { badRequest } = require('../errors');
 const { send } = require('../http');
 const fmt = require('../format');
 const { ENTRY_SELECT, shapeEntry, buildFilter } = require('../entries-core');
+const reportsPdf = require('../reports-pdf');
+const branding = require('../branding');
+const audit = require('../audit');
 
 const GROUPS = {
   client:  { label: 'Cliente',       key: 'c.id',          name: 'c.name' },
@@ -44,6 +47,86 @@ function aggregate(groupName, clause, params) {
     billableMinutes: r.billable_minutes,
     valueCents: r.value_cents,
   }));
+}
+
+/**
+ * Memória de cálculo de um cliente num período, opcionalmente restrita a um
+ * único projeto. É a base tanto do JSON consumido pela tela quanto do PDF.
+ *
+ * Escopo:
+ *   - sem projectId → consolida todos os projetos do cliente;
+ *   - com projectId → isola aquele projeto.
+ */
+function buildInvoiceReport(ctx) {
+  const clientId = v.int(ctx.query.clientId, 'cliente');
+  const from = v.isoDate(ctx.query.from, 'de');
+  const to = v.isoDate(ctx.query.to, 'até');
+  if (from > to) throw badRequest('A data inicial deve ser anterior à data final.');
+
+  const client = db.one('SELECT * FROM clients WHERE id = ?', [clientId]);
+  if (!client) throw badRequest('Cliente não encontrado.');
+
+  let project = null;
+  if (ctx.query.projectId) {
+    const projectId = v.int(ctx.query.projectId, 'projeto');
+    project = db.one('SELECT * FROM projects WHERE id = ?', [projectId]);
+    if (!project) throw badRequest('Projeto não encontrado.');
+    if (project.client_id !== clientId) {
+      throw badRequest('O projeto informado não pertence a este cliente.');
+    }
+  }
+
+  const query = { ...ctx.query, clientId: String(clientId), from, to };
+  const { clause, params } = buildFilter(query, ctx.user, v);
+  const entries = db.all(
+    `${ENTRY_SELECT} ${clause} ORDER BY p.name, te.work_date, te.id`, params
+  ).map(shapeEntry);
+
+  const byProject = new Map();
+  for (const e of entries) {
+    if (!byProject.has(e.projectId)) {
+      byProject.set(e.projectId, {
+        projectId: e.projectId, projectName: e.projectName, projectCode: e.projectCode,
+        billingType: e.billingType, minutes: 0, billableMinutes: 0, valueCents: 0,
+        professionals: new Map(), entries: [],
+      });
+    }
+    const p = byProject.get(e.projectId);
+    p.minutes += e.minutes;
+    if (e.billable) p.billableMinutes += e.minutes;
+    p.valueCents += e.valueCents;
+    p.entries.push(e);
+
+    const key = `${e.userId}:${e.rateCents}`;
+    const prof = p.professionals.get(key) || {
+      userId: e.userId, userName: e.userName, rateCents: e.rateCents,
+      minutes: 0, billableMinutes: 0, valueCents: 0,
+    };
+    prof.minutes += e.minutes;
+    if (e.billable) prof.billableMinutes += e.minutes;
+    prof.valueCents += e.valueCents;
+    p.professionals.set(key, prof);
+  }
+
+  const projects = [...byProject.values()].map((p) => ({
+    ...p,
+    hours: fmt.minutesToHm(p.minutes),
+    professionals: [...p.professionals.values()],
+  }));
+
+  return {
+    client: { id: client.id, name: client.name, document: client.document, email: client.email },
+    project: project ? { id: project.id, name: project.name, code: project.code } : null,
+    period: { from, to },
+    generatedAt: new Date().toISOString(),
+    projects,
+    totals: {
+      entries: entries.length,
+      minutes: entries.reduce((s, e) => s + e.minutes, 0),
+      billableMinutes: entries.reduce((s, e) => s + (e.billable ? e.minutes : 0), 0),
+      valueCents: entries.reduce((s, e) => s + e.valueCents, 0),
+    },
+  };
 }
 
 module.exports = function register(router) {
@@ -97,7 +180,7 @@ module.exports = function register(router) {
       rows.map((e) => [
         fmt.isoToBr(e.workDate), e.clientName, e.projectName, e.projectCode || '', e.userName,
         e.description, fmt.minutesToHm(e.minutes),
-        String(fmt.minutesToDecimal(e.minutes)).replace('.', ','),
+        fmt.minutesToDecimalBr(e.minutes),
         e.billable ? 'Sim' : 'Não', fmt.centsToBrl(e.rateCents), fmt.centsToBrl(e.valueCents),
         e.invoiceReference || '',
       ])
@@ -117,64 +200,38 @@ module.exports = function register(router) {
    * o cliente costuma exigir como anexo da NF de honorários.
    */
   router.get('/api/reports/invoice', async (ctx) => {
-    const clientId = v.int(ctx.query.clientId, 'cliente');
-    const from = v.isoDate(ctx.query.from, 'de');
-    const to = v.isoDate(ctx.query.to, 'até');
-    if (from > to) throw badRequest('A data inicial deve ser anterior à data final.');
+    return buildInvoiceReport(ctx);
+  });
 
-    const client = db.one('SELECT * FROM clients WHERE id = ?', [clientId]);
-    if (!client) throw badRequest('Cliente não encontrado.');
-
-    const query = { ...ctx.query, clientId: String(clientId), from, to };
-    const { clause, params } = buildFilter(query, ctx.user, v);
-    const entries = db.all(
-      `${ENTRY_SELECT} ${clause} ORDER BY p.name, te.work_date, te.id`, params
-    ).map(shapeEntry);
-
-    const byProject = new Map();
-    for (const e of entries) {
-      if (!byProject.has(e.projectId)) {
-        byProject.set(e.projectId, {
-          projectId: e.projectId, projectName: e.projectName, projectCode: e.projectCode,
-          billingType: e.billingType, minutes: 0, billableMinutes: 0, valueCents: 0,
-          professionals: new Map(), entries: [],
-        });
-      }
-      const p = byProject.get(e.projectId);
-      p.minutes += e.minutes;
-      if (e.billable) p.billableMinutes += e.minutes;
-      p.valueCents += e.valueCents;
-      p.entries.push(e);
-
-      const key = `${e.userId}:${e.rateCents}`;
-      const prof = p.professionals.get(key) || {
-        userId: e.userId, userName: e.userName, rateCents: e.rateCents,
-        minutes: 0, billableMinutes: 0, valueCents: 0,
-      };
-      prof.minutes += e.minutes;
-      if (e.billable) prof.billableMinutes += e.minutes;
-      prof.valueCents += e.valueCents;
-      p.professionals.set(key, prof);
+  /**
+   * O mesmo relatório em PDF, com o papel timbrado do escritório.
+   * `projectId` ausente consolida o cliente inteiro; presente, isola o projeto.
+   * `detail=full` acrescenta o detalhamento de todas as atividades.
+   */
+  router.get('/api/reports/pdf', async (ctx) => {
+    const dados = buildInvoiceReport(ctx);
+    if (dados.totals.entries === 0) {
+      throw badRequest('Não há horas lançadas para este escopo e período — nada a gerar.');
     }
+    const detalhado = ctx.query.detail === 'full';
+    const pdf = reportsPdf.build(dados, branding.get(), branding.logo(), {
+      detailed: detalhado,
+      projectName: dados.project ? dados.project.name : null,
+      emitidoPor: ctx.user.name,
+    });
 
-    const projects = [...byProject.values()].map((p) => ({
-      ...p,
-      hours: fmt.minutesToHm(p.minutes),
-      professionals: [...p.professionals.values()],
-    }));
+    audit.log(ctx.user.id, 'export_pdf', 'client', dados.client.id, {
+      projectId: dados.project?.id ?? null, from: dados.period.from, to: dados.period.to,
+      entries: dados.totals.entries, detailed: detalhado,
+    });
 
-    return {
-      client: { id: client.id, name: client.name, document: client.document, email: client.email },
-      period: { from, to },
-      generatedAt: new Date().toISOString(),
-      projects,
-      totals: {
-        entries: entries.length,
-        minutes: entries.reduce((s, e) => s + e.minutes, 0),
-        billableMinutes: entries.reduce((s, e) => s + (e.billable ? e.minutes : 0), 0),
-        valueCents: entries.reduce((s, e) => s + e.valueCents, 0),
-      },
-    };
+    const nome = reportsPdf.fileName(dados, dados.project ? dados.project.name : null);
+    send(ctx.res, 200, pdf, {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${nome}"`,
+      'Content-Length': String(pdf.length),
+      'Cache-Control': 'no-store',
+    });
   });
 
   /** Trilha de auditoria — exclusiva da conta master. */
@@ -195,3 +252,5 @@ module.exports = function register(router) {
     };
   }, { role: 'master' });
 };
+
+module.exports.buildInvoiceReport = buildInvoiceReport;

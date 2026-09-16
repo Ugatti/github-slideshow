@@ -4,7 +4,7 @@ const path = require('node:path');
 const { HttpError, notFound, badRequest, unauthorized, forbidden } = require('./errors');
 const auth = require('./auth');
 
-const MAX_BODY_BYTES = 256 * 1024;
+const MAX_BODY_BYTES = 1024 * 1024;   // acomoda o envio do logotipo em base64
 // Acima deste volume nem vale drenar para responder: a conexão é encerrada.
 const HARD_BODY_LIMIT = 8 * 1024 * 1024;
 

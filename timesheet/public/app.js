@@ -799,11 +799,14 @@ function groupTable(groups, totals) {
 /* ====================================================== tela: nota fiscal */
 
 views.nota = async function nota(root, nav) {
-  const range = state.filters.nota || (state.filters.nota = monthRange(-1));
+  const f = state.filters.nota || (state.filters.nota = monthRange(-1));
+
   root.innerHTML = `
     <div class="page-head no-print">
-      <div><h2>Memória de cálculo para nota fiscal</h2>
-        <p>Selecione cliente e período para gerar o demonstrativo de horas que acompanha a NF de honorários.</p></div>
+      <div><h2>Relatórios em PDF e fechamento</h2>
+        <p>Gere o demonstrativo de horas por cliente ou por projeto, no período que escolher.</p></div>
+      <div class="spacer"></div>
+      <button class="btn" id="nf-brand" type="button">Papel timbrado</button>
     </div>
 
     <div class="card no-print">
@@ -811,12 +814,16 @@ views.nota = async function nota(root, nav) {
         <div class="filters">
           <div class="field">
             <label for="nf-client">Cliente</label>
-            <select id="nf-client">${clientOptions(range.clientId)}</select>
+            <select id="nf-client">${clientOptions(f.clientId)}</select>
+          </div>
+          <div class="field">
+            <label for="nf-project">Escopo</label>
+            <select id="nf-project"></select>
           </div>
           <div class="field"><label for="nf-from">De</label>
-            <input id="nf-from" type="date" value="${range.from}"></div>
+            <input id="nf-from" type="date" value="${f.from}"></div>
           <div class="field"><label for="nf-to">Até</label>
-            <input id="nf-to" type="date" value="${range.to}"></div>
+            <input id="nf-to" type="date" value="${f.to}"></div>
           <div class="field">
             <label for="nf-detail">Detalhamento</label>
             <select id="nf-detail">
@@ -826,15 +833,16 @@ views.nota = async function nota(root, nav) {
           </div>
         </div>
         <div class="form-actions">
-          <button class="btn btn-primary" id="nf-go" type="button">Gerar demonstrativo</button>
+          <button class="btn btn-primary" id="nf-pdf" type="button">Baixar PDF</button>
+          <button class="btn" id="nf-go" type="button">Pré-visualizar na tela</button>
           <div class="chips">
             <button class="chip" data-nfrange="-1" type="button">Mês anterior</button>
             <button class="chip" data-nfrange="0" type="button">Mês atual</button>
+            <button class="chip" data-nfrange="-2" type="button">Há dois meses</button>
           </div>
           <div class="spacer" style="flex:1"></div>
-          <button class="btn" id="nf-print" type="button" disabled>Imprimir / PDF</button>
-          <button class="btn" id="nf-csv" type="button" disabled>Exportar CSV</button>
-          <button class="btn btn-primary" id="nf-close" type="button" disabled>Fechar período</button>
+          <button class="btn" id="nf-csv" type="button">Exportar CSV</button>
+          <button class="btn" id="nf-close" type="button" disabled>Fechar período</button>
         </div>
       </div>
     </div>
@@ -848,24 +856,67 @@ views.nota = async function nota(root, nav) {
     </div>`;
 
   const out = root.querySelector('#nf-out');
+  const seletorCliente = root.querySelector('#nf-client');
+  const seletorProjeto = root.querySelector('#nf-project');
 
-  async function generate() {
-    const clientId = root.querySelector('#nf-client').value;
-    const from = root.querySelector('#nf-from').value;
-    const to = root.querySelector('#nf-to').value;
-    if (!clientId || !from || !to) return toast('Informe cliente e período.', 'error');
-    state.filters.nota = { clientId, from, to };
+  /** O escopo depende do cliente: repovoa a lista de projetos a cada troca. */
+  function preencherProjetos(selecionado = '') {
+    const clientId = Number(seletorCliente.value);
+    const doCliente = state.projects.filter((p) => p.clientId === clientId);
+    seletorProjeto.innerHTML =
+      `<option value="">Todos os projetos do cliente (consolidado)</option>` +
+      doCliente.map((p) =>
+        `<option value="${p.id}" ${String(p.id) === String(selecionado) ? 'selected' : ''}>` +
+        `Somente: ${esc(p.name)}${p.code ? ` · ${esc(p.code)}` : ''}</option>`).join('');
+    seletorProjeto.disabled = doCliente.length === 0;
+  }
 
+  const parametros = () => ({
+    clientId: seletorCliente.value,
+    projectId: seletorProjeto.value,
+    from: root.querySelector('#nf-from').value,
+    to: root.querySelector('#nf-to').value,
+  });
+
+  function validar() {
+    const p = parametros();
+    if (!p.clientId) { toast('Selecione o cliente.', 'error'); return null; }
+    if (!p.from || !p.to) { toast('Informe o período.', 'error'); return null; }
+    if (p.from > p.to) { toast('A data inicial deve ser anterior à final.', 'error'); return null; }
+    state.filters.nota = p;
+    return p;
+  }
+
+  async function preview() {
+    const p = validar();
+    if (!p) return;
     try {
-      const data = await API.get(`/api/reports/invoice?${qs({ clientId, from, to })}`);
+      const data = await API.get(`/api/reports/invoice?${qs(p)}`);
       if (!stillCurrent(nav)) return;
       state.lastReport = data;
-      const detail = root.querySelector('#nf-detail').value === 'full';
-      out.innerHTML = renderInvoiceReport(data, detail);
-      for (const id of ['nf-print', 'nf-csv', 'nf-close']) {
-        root.querySelector(`#${id}`).disabled = data.totals.entries === 0;
-      }
+      out.innerHTML = renderInvoiceReport(data, root.querySelector('#nf-detail').value === 'full');
+      root.querySelector('#nf-close').disabled = data.totals.entries === 0;
+      out.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) { toast(err.message, 'error'); }
+  }
+
+  async function baixarPdf() {
+    const p = validar();
+    if (!p) return;
+    const botao = root.querySelector('#nf-pdf');
+    botao.disabled = true;
+    const rotulo = botao.textContent;
+    botao.textContent = 'Gerando…';
+    try {
+      const url = `/api/reports/pdf?${qs({ ...p, detail: root.querySelector('#nf-detail').value })}`;
+      const nome = await downloadFile(url);
+      if (nome) toast(`PDF salvo: ${nome}`, 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      botao.disabled = false;
+      botao.textContent = rotulo;
+    }
   }
 
   async function loadInvoices() {
@@ -912,27 +963,64 @@ views.nota = async function nota(root, nav) {
     } catch (err) { toast(err.message, 'error'); }
   }
 
-  root.querySelector('#nf-go').addEventListener('click', generate);
+  seletorCliente.addEventListener('change', () => {
+    preencherProjetos();
+    out.innerHTML = '';
+    root.querySelector('#nf-close').disabled = true;
+  });
+  seletorProjeto.addEventListener('change', () => { out.innerHTML = ''; });
+  root.querySelector('#nf-pdf').addEventListener('click', baixarPdf);
+  root.querySelector('#nf-go').addEventListener('click', preview);
+  root.querySelector('#nf-brand').addEventListener('click', brandingModal);
   root.querySelector('#nf-detail').addEventListener('change', () => {
     if (state.lastReport) {
-      out.innerHTML = renderInvoiceReport(state.lastReport, root.querySelector('#nf-detail').value === 'full');
+      out.innerHTML = renderInvoiceReport(state.lastReport,
+        root.querySelector('#nf-detail').value === 'full');
     }
   });
   root.querySelectorAll('[data-nfrange]').forEach((chip) => chip.addEventListener('click', () => {
     const r = monthRange(Number(chip.dataset.nfrange));
     root.querySelector('#nf-from').value = r.from;
     root.querySelector('#nf-to').value = r.to;
-    generate();
+    out.innerHTML = '';
   }));
-  root.querySelector('#nf-print').addEventListener('click', () => window.print());
   root.querySelector('#nf-csv').addEventListener('click', () => {
-    const { clientId, from, to } = state.filters.nota;
-    window.location.href = `/api/reports/export.csv?${qs({ clientId, from, to })}`;
+    const p = validar();
+    if (p) window.location.href = `/api/reports/export.csv?${qs(p)}`;
   });
   root.querySelector('#nf-close').addEventListener('click', () => closePeriodModal(loadInvoices));
 
+  preencherProjetos(f.projectId);
   await loadInvoices();
 };
+
+/**
+ * Baixa um arquivo da API e devolve o nome salvo. Passa pelo fetch em vez de
+ * navegar até a URL para que um erro chegue como mensagem legível, e não como
+ * JSON cru na tela.
+ */
+async function downloadFile(url) {
+  const res = await fetch(url, { credentials: 'same-origin' });
+  if (!res.ok) {
+    const tipo = res.headers.get('content-type') || '';
+    const corpo = tipo.includes('application/json') ? await res.json() : null;
+    throw new Error(corpo?.error || `Não foi possível gerar o arquivo (${res.status}).`);
+  }
+  const disposicao = res.headers.get('content-disposition') || '';
+  const nome = /filename="([^"]+)"/.exec(disposicao)?.[1] || 'relatorio.pdf';
+
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = nome;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+  return nome;
+}
+
 
 function renderInvoiceReport(data, detailed) {
   const doc = data.client.document;
@@ -1064,6 +1152,141 @@ function closePeriodModal(reload) {
       });
       toast('Período fechado.', 'success');
       reload();
+      return true;
+    },
+  });
+}
+
+/* ------------------------------------------------- papel timbrado dos PDFs */
+
+/**
+ * Identidade visual aplicada ao cabeçalho dos relatórios em PDF. Fica aqui, ao
+ * lado da geração, porque é onde o efeito da mudança aparece.
+ */
+function brandingModal() {
+  openModal({
+    title: 'Papel timbrado dos relatórios',
+    wide: true,
+    render: async (body) => {
+      body.innerHTML = '<div class="empty">Carregando…</div>';
+      const { branding: b } = await API.get('/api/settings/branding');
+
+      body.innerHTML = `
+        <div class="alert info">
+          Estes dados compõem o cabeçalho e o rodapé de todo PDF emitido pelo sistema.
+        </div>
+        <div class="form-grid">
+          <div class="field span-all">
+            <label for="b-name">Nome do escritório</label>
+            <input id="b-name" type="text" value="${esc(b.name)}">
+          </div>
+          <div class="field">
+            <label for="b-tagline">Subtítulo</label>
+            <input id="b-tagline" type="text" value="${esc(b.tagline)}" placeholder="Advocacia empresarial">
+          </div>
+          <div class="field">
+            <label for="b-cnpj">CNPJ</label>
+            <input id="b-cnpj" type="text" value="${esc(formatDoc(b.cnpj) === '—' ? '' : formatDoc(b.cnpj))}">
+          </div>
+          <div class="field span-all">
+            <label for="b-address">Endereço</label>
+            <input id="b-address" type="text" value="${esc(b.address)}"
+                   placeholder="Av. Paulista, 1000 — cj. 142 — São Paulo/SP">
+          </div>
+          <div class="field">
+            <label for="b-phone">Telefone</label>
+            <input id="b-phone" type="text" value="${esc(b.phone)}">
+          </div>
+          <div class="field">
+            <label for="b-email">E-mail</label>
+            <input id="b-email" type="email" value="${esc(b.email)}">
+          </div>
+          <div class="field">
+            <label for="b-site">Site</label>
+            <input id="b-site" type="text" value="${esc(b.site)}">
+          </div>
+          <div class="field">
+            <label for="b-primary">Cor principal</label>
+            <input id="b-primary" type="color" value="${esc(b.primaryColor)}" style="height:38px;padding:3px">
+          </div>
+          <div class="field">
+            <label for="b-accent">Cor de destaque</label>
+            <input id="b-accent" type="color" value="${esc(b.accentColor)}" style="height:38px;padding:3px">
+          </div>
+          <div class="field span-all">
+            <label for="b-footer">Nota de rodapé</label>
+            <input id="b-footer" type="text" value="${esc(b.footerNote)}">
+          </div>
+          <div class="field span-all">
+            <label>Logotipo</label>
+            <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+                        padding:12px;border:1px dashed var(--line);border-radius:6px">
+              <div id="b-logo-preview" style="min-width:128px;min-height:46px;display:grid;place-items:center">
+                ${b.hasLogo
+                  ? `<img src="/api/settings/logo?t=${Date.now()}" alt="Logotipo"
+                          style="max-width:160px;max-height:56px">`
+                  : '<span class="small muted">sem logotipo</span>'}
+              </div>
+              <div style="flex:1;min-width:190px">
+                <input id="b-logo-file" type="file" accept="image/png,image/jpeg" class="small">
+                <div class="help" style="margin-top:5px">
+                  PNG ou JPEG, até 512 KB. PNG com fundo transparente fica melhor.
+                  Sem logotipo, o cabeçalho usa o nome do escritório.
+                </div>
+              </div>
+              ${b.hasLogo ? '<button class="btn btn-sm btn-danger" id="b-logo-del" type="button">Remover</button>' : ''}
+            </div>
+          </div>
+        </div>`;
+
+      const arquivo = body.querySelector('#b-logo-file');
+      arquivo.addEventListener('change', async () => {
+        const file = arquivo.files[0];
+        if (!file) return;
+        if (file.size > 512 * 1024) return toast('O logotipo deve ter no máximo 512 KB.', 'error');
+        try {
+          const dataUrl = await new Promise((resolve, reject) => {
+            const leitor = new FileReader();
+            leitor.onload = () => resolve(leitor.result);
+            leitor.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
+            leitor.readAsDataURL(file);
+          });
+          await API.post('/api/settings/logo', { dataUrl });
+          body.querySelector('#b-logo-preview').innerHTML =
+            `<img src="/api/settings/logo?t=${Date.now()}" alt="Logotipo" style="max-width:160px;max-height:56px">`;
+          toast('Logotipo enviado.', 'success');
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      });
+
+      body.querySelector('#b-logo-del')?.addEventListener('click', async () => {
+        await API.del('/api/settings/logo');
+        body.querySelector('#b-logo-preview').innerHTML = '<span class="small muted">sem logotipo</span>';
+        toast('Logotipo removido.', 'success');
+      });
+    },
+    confirmLabel: 'Salvar',
+    onConfirm: async (body) => {
+      // O formulário carrega de forma assíncrona; clicar antes disso não pode
+      // gravar um cadastro vazio por cima do que já existe.
+      if (!body.querySelector('#b-name')) {
+        toast('Aguarde o carregamento do formulário.', 'error');
+        return false;
+      }
+      await API.put('/api/settings/branding', {
+        name: body.querySelector('#b-name').value,
+        tagline: body.querySelector('#b-tagline').value,
+        cnpj: body.querySelector('#b-cnpj').value,
+        address: body.querySelector('#b-address').value,
+        phone: body.querySelector('#b-phone').value,
+        email: body.querySelector('#b-email').value,
+        site: body.querySelector('#b-site').value,
+        primaryColor: body.querySelector('#b-primary').value,
+        accentColor: body.querySelector('#b-accent').value,
+        footerNote: body.querySelector('#b-footer').value,
+      });
+      toast('Papel timbrado atualizado.', 'success');
       return true;
     },
   });

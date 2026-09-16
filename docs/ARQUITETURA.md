@@ -142,12 +142,54 @@ recarregar a página é o ciclo completo de desenvolvimento.
 dado vindo do servidor passa por `esc()` sem exceção, e o código é curto o
 bastante para auditar.
 
-## Impressão como funcionalidade
+## Gerador de PDF próprio
 
-O demonstrativo para nota fiscal é gerado pelo `@media print` do CSS, não por
-biblioteca de PDF. "Imprimir / PDF" usa o diálogo do navegador. Uma dependência
-a menos, e o resultado é um PDF com texto selecionável e pesquisável, não uma
-imagem.
+`server/pdf/` escreve o PDF byte a byte: `encoding.js` (WinAnsi e larguras das
+fontes padrão), `image.js` (PNG e JPEG como XObject) e `document.js` (páginas,
+texto, tabelas com quebra automática, imagens).
+
+**Por que não usar uma biblioteca.** Um PDF de relatório usa uma fração do
+formato: texto em fontes padrão, linhas, retângulos e uma imagem. As 14 fontes
+padrão dispensam incorporação, e `node:zlib` já faz a compressão. São cerca de
+900 linhas, contra uma dependência com árvore própria num sistema cujo pilar é
+não ter nenhuma.
+
+**Por que não gerar pelo navegador.** O `@media print` continua existindo para
+a pré-visualização, mas depender dele significaria pedir ao usuário que
+escolhesse "Salvar como PDF" no diálogo de impressão — e o resultado sairia com
+o cabeçalho e a numeração do navegador, não com o papel timbrado do escritório.
+Um relatório que acompanha nota fiscal precisa sair pronto.
+
+**Detalhes que custaram uma correção cada:**
+
+- Acentuação: nas fontes padrão da Adobe, "á" tem a mesma largura de "a", o que
+  permite dobrar os acentos sobre a base em vez de carregar uma tabela de 256
+  larguras por fonte.
+- Metadados: strings do dicionário `/Info` não usam a codificação da fonte. Com
+  WinAnsi, o travessão do título virava "Š" na aba do leitor; a correção foi
+  UTF-16BE com BOM.
+- Transparência: PNG com canal alfa vira imagem RGB mais uma `SMask`, senão um
+  logotipo de fundo transparente aparece sobre um retângulo preto.
+- Larguras de coluna: são calculadas com as métricas reais da fonte, e um teste
+  confere que o conteúdo previsto cabe — "12/08/2..." num relatório enviado ao
+  cliente é um defeito visível.
+
+## Identidade visual no banco, não no código
+
+`branding.js` guarda nome, CNPJ, endereço, contatos, cores e logotipo na tabela
+`settings`. Trocar o logotipo é enviar um arquivo pela tela, não editar código e
+reimplantar — que é o que aconteceria se o timbrado fosse constante no fonte.
+
+O logotipo é validado **no envio**, passando pelo mesmo parser que o gerador
+usa: um arquivo que o PDF não entende precisa ser recusado ali, não na hora de
+emitir o relatório que vai para o cliente.
+
+## Escopo dos relatórios
+
+`buildInvoiceReport` atende cliente e projeto com o mesmo código: sem
+`projectId` consolida todos os projetos do cliente; com ele, isola um. Um teste
+confere que os relatórios por projeto **somam exatamente** o consolidado — é a
+propriedade que o escritório precisa poder afirmar diante de um cliente.
 
 ## Versão demonstrativa
 

@@ -10,6 +10,9 @@ function minutesToHm(minutes) {
 /** 90 → 1.5 (duas casas, como usado para multiplicar pelo valor/hora) */
 const minutesToDecimal = (minutes) => Math.round((minutes / 60) * 100) / 100;
 
+/** 90 → "1,50"; 840 → "14,00". Sempre duas casas, para as colunas alinharem. */
+const minutesToDecimalBr = (minutes) => ((minutes || 0) / 60).toFixed(2).replace('.', ',');
+
 /**
  * Valor de um lançamento. Trabalha em centavos e arredonda só no final,
  * evitando o acúmulo de centavos que aparece ao somar valores já arredondados.
@@ -50,5 +53,6 @@ function toCsv(headers, rows) {
 }
 
 module.exports = {
-  minutesToHm, minutesToDecimal, entryValueCents, centsToBrl, isoToBr, csvCell, toCsv,
+  minutesToHm, minutesToDecimal, minutesToDecimalBr, entryValueCents, centsToBrl,
+  isoToBr, csvCell, toCsv,
 };

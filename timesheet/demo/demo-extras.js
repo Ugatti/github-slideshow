@@ -86,6 +86,62 @@
     });
   };
 
+  /* ------------------------------------------------------ download de PDF */
+
+  /**
+   * O PDF é montado no servidor (server/pdf/), que não existe nesta
+   * demonstração — e o ambiente publicado bloqueia downloads iniciados por
+   * script. Em vez de um botão morto, explicamos e mostramos na tela o mesmo
+   * conteúdo que vai para o arquivo.
+   */
+  window.downloadFile = async function (url) {
+    const params = Object.fromEntries(new URL(url, location.origin).searchParams.entries());
+    const data = await API.get(`/api/reports/invoice?${qs(params)}`);
+    if (!data.totals.entries) {
+      throw new Error('Não há horas lançadas para este escopo e período — nada a gerar.');
+    }
+    const analitico = params.detail === 'full';
+
+    openModal({
+      title: 'Relatório em PDF',
+      wide: true,
+      render: (body) => {
+        body.innerHTML = `
+          <div class="alert info">
+            No sistema instalado, este botão <strong>baixa um PDF</strong> com o papel
+            timbrado do escritório — logotipo, dados de contato e cores configuráveis.
+            A demonstração roda dentro de uma página publicada, que bloqueia downloads,
+            então mostramos abaixo o que o arquivo conteria.
+          </div>
+          <div class="form-grid" style="grid-template-columns:1fr 1fr">
+            <div class="field"><label>Cliente</label>
+              <div>${esc(data.client.name)}</div></div>
+            <div class="field"><label>Escopo</label>
+              <div>${data.project ? `Projeto “${esc(data.project.name)}”` : 'Todos os projetos do cliente'}</div></div>
+            <div class="field"><label>Período</label>
+              <div>${dateBr(data.period.from)} a ${dateBr(data.period.to)}</div></div>
+            <div class="field"><label>Detalhamento</label>
+              <div>${analitico ? 'Analítico — todas as atividades' : 'Resumido — por projeto e profissional'}</div></div>
+            <div class="field"><label>Horas</label>
+              <div>${hm(data.totals.minutes)} (${hm(data.totals.billableMinutes)} faturáveis)</div></div>
+            <div class="field"><label>Total</label>
+              <div style="color:var(--gold);font-weight:600">${brlFull(data.totals.valueCents)}</div></div>
+          </div>
+          <p class="small muted" style="margin:14px 0 0">
+            ${data.projects.length} projeto(s) · ${data.totals.entries} atividade(s) ·
+            nome do arquivo: <code>horas_${esc(data.client.name.toLowerCase().normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').slice(0, 30))}_${data.period.from}_${data.period.to}.pdf</code>
+          </p>`;
+      },
+      confirmLabel: 'Ver na tela',
+      onConfirm: () => {
+        document.querySelector('#nf-go')?.click();
+        return true;
+      },
+    });
+    return null;   // nada foi salvo em disco: quem chamou não deve anunciar sucesso
+  };
+
   /* ----------------------------------------------- preenchimento rápido do login */
 
   document.querySelectorAll('[data-demo-login]').forEach((botao) => {
