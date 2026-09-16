@@ -160,6 +160,25 @@ capturar um estado parcial — por isso o script existe.
 é o único dado aqui que não se reconstrói. `deploy/backup-diario.sh` faz o
 backup e tem a seção de envio externo (rclone) pronta para descomentar.
 
+### Servir como subpágina de um site
+
+O sistema também roda fora da raiz do domínio — por exemplo em
+`azeredoeugatti.com.br/timesheet`, com o site institucional seguindo intacto no
+resto do endereço:
+
+```bash
+BASE_PATH=/timesheet
+PUBLIC_ORIGIN=https://azeredoeugatti.com.br
+```
+
+`BASE_PATH` faz o sistema responder apenas sob aquele caminho; `PUBLIC_ORIGIN`
+é necessário quando o proxy à frente reescreve o cabeçalho `Host` (um Worker da
+Cloudflare, por exemplo), para que a proteção contra CSRF reconheça o endereço
+público. `deploy/cloudflare-worker.js` traz o proxy pronto.
+
+O front-end deriva o caminho da própria URL, então o mesmo pacote serve nos dois
+modos, sem build separado.
+
 ### Colocar em produção
 
 Veja [`../docs/IMPLANTACAO.md`](../docs/IMPLANTACAO.md) — recomendação de

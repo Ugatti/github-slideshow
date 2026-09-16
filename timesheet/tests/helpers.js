@@ -4,13 +4,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 /** Sobe uma instância do app com banco temporário e devolve um cliente HTTP. */
-async function startTestServer() {
+async function startTestServer({ basePath = '' } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-ts-'));
   const dbPath = path.join(dir, 'test.db');
 
   // O app é carregado depois do env para que config.js leia estes valores.
   process.env.BOOTSTRAP_MASTER_EMAIL = 'master@teste.com.br';
   process.env.BOOTSTRAP_MASTER_PASSWORD = 'MasterTeste123';
+  if (basePath) process.env.BASE_PATH = basePath;
+  else delete process.env.BASE_PATH;
   for (const key of Object.keys(require.cache)) {
     if (key.includes(`${path.sep}timesheet${path.sep}server${path.sep}`)) delete require.cache[key];
   }
@@ -23,7 +25,8 @@ async function startTestServer() {
   const base = `http://127.0.0.1:${server.address().port}`;
 
   return {
-    base,
+    base: base + basePath,
+    origin: base,
     async stop() {
       await new Promise((resolve) => server.close(resolve));
       db.close();

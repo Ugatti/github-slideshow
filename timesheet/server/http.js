@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { HttpError, notFound, badRequest, unauthorized, forbidden } = require('./errors');
 const auth = require('./auth');
+const config = require('./config');
 
 const MAX_BODY_BYTES = 1024 * 1024;   // acomoda o envio do logotipo em base64
 // Acima deste volume nem vale drenar para responder: a conexão é encerrada.
@@ -172,18 +173,30 @@ function serveStatic(res, rootDir, urlPath) {
 /**
  * Defesa em profundidade contra CSRF. O cookie já é SameSite=Strict; além disso
  * toda mutação precisa vir da mesma origem (fetch do próprio app envia Origin).
+ *
+ * Atrás de um proxy que reescreve o Host (um Worker da Cloudflare, por
+ * exemplo), o Host que chega aqui não é o que o navegador vê. Nesse caso
+ * PUBLIC_ORIGIN informa o endereço público, e ele também é aceito.
  */
 function assertSameOrigin(req) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return;
   const origin = req.headers.origin;
   if (!origin) return; // clientes não-browser (curl, testes) não enviam Origin
+
   let originHost;
   try {
     originHost = new URL(origin).host;
   } catch {
     throw forbidden('Origem inválida.');
   }
-  if (originHost !== req.headers.host) {
+
+  const aceitos = new Set();
+  if (req.headers.host) aceitos.add(req.headers.host);
+  if (config.publicOrigin) {
+    try { aceitos.add(new URL(config.publicOrigin).host); } catch { /* valor inválido */ }
+  }
+
+  if (!aceitos.has(originHost)) {
     throw forbidden('Requisição de origem cruzada bloqueada.');
   }
 }
@@ -193,11 +206,26 @@ function assertSameOrigin(req) {
 function createHandler({ router, publicDir }) {
   const root = path.resolve(publicDir);
 
+  const base = config.basePath;
+
   return async function handle(req, res) {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    const pathname = url.pathname;
+    let pathname = url.pathname;
 
     try {
+      if (base) {
+        // Servido como subpágina de um site: o proxy encaminha o caminho
+        // inteiro, e é aqui que ele é retirado antes do roteamento.
+        if (pathname === base) {
+          // Sem a barra final, "styles.css" resolveria para a raiz do domínio
+          // e a página carregaria sem estilo nenhum.
+          res.writeHead(308, { Location: `${base}/` });
+          return res.end();
+        }
+        if (!pathname.startsWith(`${base}/`)) throw notFound('Rota não encontrada.');
+        pathname = pathname.slice(base.length) || '/';
+      }
+
       if (!pathname.startsWith('/api/')) {
         if (req.method !== 'GET' && req.method !== 'HEAD') {
           return sendJson(res, 405, { error: 'Método não permitido.' });

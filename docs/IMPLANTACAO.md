@@ -5,7 +5,93 @@ fórum, celular) e a conta master baixa os relatórios à distância.
 
 ---
 
-## Recomendação
+## Onde o site do escritório está hoje
+
+Consulta ao DNS de `azeredoeugatti.com.br` (setembro de 2026):
+
+| Item | O que está em uso |
+|---|---|
+| Site | **Framer** (`www` aponta para `sites.framer.app`) |
+| DNS | **Cloudflare** (`sreeni.ns.cloudflare.com`, `lamar.ns.cloudflare.com`) |
+| E-mail | **Microsoft 365** |
+
+Isso responde à pergunta sobre aproveitar o domínio e a hospedagem atuais:
+
+- **O domínio, sim.** Nas duas opções abaixo o sistema fica dentro de
+  `azeredoeugatti.com.br`. Ninguém digita endereço de terceiro.
+- **A hospedagem, não.** O Framer publica páginas prontas a partir da CDN dele;
+  não roda aplicação, banco de dados nem processo de servidor. Nenhum construtor
+  de sites desse tipo roda — a limitação não é do Framer em particular. O
+  sistema precisa de um servidor próprio de qualquer forma; o que se decide
+  abaixo é **como o domínio aponta para ele**.
+
+O DNS estar na Cloudflare é uma boa notícia: ela é justamente o que torna a
+opção de subpágina possível.
+
+---
+
+## Duas formas de usar o domínio do escritório
+
+### Opção A — subdomínio (recomendada)
+
+```
+https://timesheet.azeredoeugatti.com.br
+```
+
+Um registro A no painel da Cloudflare apontando para o IP da VPS. **Não encosta
+no site**: o Framer continua servindo `azeredoeugatti.com.br` exatamente como
+hoje, e um erro de configuração aqui não derruba a página institucional.
+
+Para que pareça parte do site, basta um link no menu do Framer — "Área do
+profissional" — apontando para o subdomínio. Do ponto de vista de quem usa, é
+a mesma coisa: clica no site e cai no sistema.
+
+É a opção que recomendo: resolve o que foi pedido e mantém site e sistema
+independentes. Se um dia o escritório trocar de plataforma de site, o timesheet
+não é afetado.
+
+### Opção B — subpágina do mesmo endereço
+
+```
+https://azeredoeugatti.com.br/timesheet
+```
+
+Tecnicamente possível e já implementada: o sistema aceita rodar sob um caminho
+(`BASE_PATH=/timesheet`). Um **Worker da Cloudflare** encaminha o que chega em
+`/timesheet` para a VPS e deixa todo o resto seguir para o Framer. O arquivo
+pronto está em [`../timesheet/deploy/cloudflare-worker.js`](../timesheet/deploy/cloudflare-worker.js),
+com as instruções no topo.
+
+Configuração no servidor (no `.env`):
+
+```bash
+BASE_PATH=/timesheet
+PUBLIC_ORIGIN=https://azeredoeugatti.com.br
+```
+
+`PUBLIC_ORIGIN` é necessário porque o Worker troca o cabeçalho `Host` ao
+encaminhar: sem ele, a proteção contra CSRF barraria as próprias telas do
+sistema.
+
+**O que pesar antes de escolher esta opção.** Para a rota do Worker funcionar,
+o hostname do site precisa estar com o **proxy da Cloudflare ativado** (nuvem
+laranja), e hoje ele está apenas com DNS. Essa mudança altera o caminho pelo
+qual o site institucional é servido. O Framer documenta esse arranjo, mas é
+mexer em algo que está funcionando, para ganhar um endereço mais bonito. Se
+escolher este caminho, faça a mudança num horário de baixo movimento e confira
+o site logo em seguida.
+
+Também vale restringir o subdomínio de origem (`ts-origem.…`) para aceitar
+apenas conexões vindas da Cloudflare — por firewall ou Cloudflare Tunnel —, de
+modo que exista uma única porta de entrada.
+
+> O Framer oferece ainda o recurso *Advanced Hosting*, com proxy reverso
+> embutido, nos planos Pro e Enterprise. É uma terceira via, caso o escritório
+> já tenha um desses planos.
+
+---
+
+## Recomendação de hospedagem
 
 **Uma VPS brasileira + Docker Compose com HTTPS automático.**
 Custo aproximado: **R$ 25 a R$ 40 por mês**, valor fixo, independente do número
@@ -42,9 +128,13 @@ Configuração suficiente: **2 GB de RAM, 1 vCPU, 40 GB de disco** — com folga
 
 ### 1. Domínio
 
-Crie um subdomínio apontando para o IP da VPS — por exemplo
-`timesheet.azeredoeugatti.com.br` — com um **registro A** no painel de DNS do
-domínio do escritório. Espere a propagação (minutos a poucas horas).
+No painel da **Cloudflare**, crie um **registro A** apontando para o IP da VPS:
+
+- Opção A: nome `timesheet`, proxy **desativado** (nuvem cinza) — o Caddy cuida
+  do certificado HTTPS.
+- Opção B: nome `ts-origem`, proxy desativado; o Worker é quem recebe o público.
+
+Espere a propagação (minutos).
 
 ### 2. Servidor
 
@@ -162,8 +252,11 @@ HTTPS. O serviço já vem com restrições de escrita configuradas.
 - **Renovação do domínio e da VPS** — deixar em débito automático evita que o
   sistema caia por esquecimento de pagamento.
 
-## Fontes de preço consultadas
+## Fontes consultadas
 
 - [Comparativo de VPS no Brasil (2026)](https://audaks.com.br/blog/melhores-vps-brasil-2026-comparativo-honesto)
 - [Ranking de VPS brasileiras](https://tudosobrehospedagemdesites.com.br/melhor-vps/)
 - [Preços de recursos do Fly.io](https://fly.io/docs/about/pricing/)
+- [Framer — como usar proxy reverso](https://www.framer.com/help/articles/how-to-self-host-using-reverse-proxy/)
+- [Framer — como usar proxy com Cloudflare](https://www.framer.com/help/articles/how-to-proxy-with-cloudflare/)
+- [Cloudflare — proxy reverso de subdiretório com Workers](https://403.ie/how-to-use-cloudflare-to-reverse-proxy-a-subdirectory/)

@@ -3,13 +3,21 @@
 
 /* ===================================================================== API */
 
+/**
+ * Caminho em que o sistema está publicado: '' na raiz do domínio, '/timesheet'
+ * quando servido como subpágina de um site. Derivado da própria URL, de modo
+ * que o mesmo arquivo funciona nos dois casos sem configuração no navegador.
+ */
+const API_BASE = location.pathname.replace(/\/[^/]*$/, '');
+const apiUrl = (path) => API_BASE + path;
+
 async function api(method, path, body) {
   const opts = { method, headers: {}, credentials: 'same-origin' };
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(path, opts);
+  const res = await fetch(apiUrl(path), opts);
   if (res.status === 204) return {};
   const type = res.headers.get('content-type') || '';
   const payload = type.includes('application/json') ? await res.json() : await res.text();
@@ -649,7 +657,7 @@ function bindFilterBar(root, prefix, reload) {
     if (e.key === 'Enter') reload();
   });
   root.querySelector(`#${prefix}-csv`).addEventListener('click', () => {
-    window.location.href = `/api/reports/export.csv?${readFilters(root, prefix)}`;
+    window.location.href = apiUrl(`/api/reports/export.csv?${readFilters(root, prefix)}`);
   });
 }
 
@@ -986,7 +994,7 @@ views.nota = async function nota(root, nav) {
   }));
   root.querySelector('#nf-csv').addEventListener('click', () => {
     const p = validar();
-    if (p) window.location.href = `/api/reports/export.csv?${qs(p)}`;
+    if (p) window.location.href = apiUrl(`/api/reports/export.csv?${qs(p)}`);
   });
   root.querySelector('#nf-close').addEventListener('click', () => closePeriodModal(loadInvoices));
 
@@ -1000,7 +1008,7 @@ views.nota = async function nota(root, nav) {
  * JSON cru na tela.
  */
 async function downloadFile(url) {
-  const res = await fetch(url, { credentials: 'same-origin' });
+  const res = await fetch(apiUrl(url), { credentials: 'same-origin' });
   if (!res.ok) {
     const tipo = res.headers.get('content-type') || '';
     const corpo = tipo.includes('application/json') ? await res.json() : null;
@@ -1223,7 +1231,7 @@ function brandingModal() {
                         padding:12px;border:1px dashed var(--line);border-radius:6px">
               <div id="b-logo-preview" style="min-width:128px;min-height:46px;display:grid;place-items:center">
                 ${b.hasLogo
-                  ? `<img src="/api/settings/logo?t=${Date.now()}" alt="Logotipo"
+                  ? `<img src="${apiUrl(`/api/settings/logo?t=${Date.now()}`)}" alt="Logotipo"
                           style="max-width:160px;max-height:56px">`
                   : '<span class="small muted">sem logotipo</span>'}
               </div>
@@ -1253,7 +1261,7 @@ function brandingModal() {
           });
           await API.post('/api/settings/logo', { dataUrl });
           body.querySelector('#b-logo-preview').innerHTML =
-            `<img src="/api/settings/logo?t=${Date.now()}" alt="Logotipo" style="max-width:160px;max-height:56px">`;
+            `<img src="${apiUrl(`/api/settings/logo?t=${Date.now()}`)}" alt="Logotipo" style="max-width:160px;max-height:56px">`;
           toast('Logotipo enviado.', 'success');
         } catch (err) {
           toast(err.message, 'error');

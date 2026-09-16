@@ -802,13 +802,18 @@
     await new Promise((r) => setTimeout(r, 60 + Math.random() * 90));
 
     const parsed = new URL(url, window.location.origin);
+    // A interface agora deriva a base da URL (para funcionar em subpasta de um
+    // site). Numa página publicada isso vira algo como /artifact/xyz/api/...,
+    // então o casamento das rotas parte do /api/.
+    const inicioApi = parsed.pathname.indexOf('/api/');
+    const rota = inicioApi === -1 ? parsed.pathname : parsed.pathname.slice(inicioApi);
     const method = (init.method || 'GET').toUpperCase();
     const query = Object.fromEntries(parsed.searchParams.entries());
     let body = {};
     try { body = init.body ? JSON.parse(init.body) : {}; } catch { body = {}; }
 
     for (const r of routes) {
-      const m = parsed.pathname.match(r.regex);
+      const m = rota.match(r.regex);
       if (!m || r.method !== method) continue;
       const params = {};
       r.names.forEach((name, i) => { params[name] = decodeURIComponent(m[i + 1]); });

@@ -122,7 +122,7 @@ function isLockedOut(email) {
 function serializeCookie(token, expiresAt) {
   const parts = [
     `${COOKIE}=${token}`,
-    'Path=/',
+    `Path=${config.basePath || '/'}`,
     'HttpOnly',
     'SameSite=Strict',
     `Expires=${expiresAt.toUTCString()}`,
@@ -132,7 +132,8 @@ function serializeCookie(token, expiresAt) {
 }
 
 const clearCookie = () =>
-  `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+  `${COOKIE}=; Path=${config.basePath || '/'}; HttpOnly; SameSite=Strict; ` +
+  'Expires=Thu, 01 Jan 1970 00:00:00 GMT';
 
 function parseCookies(header) {
   const out = {};

@@ -8,8 +8,26 @@ function bool(value, fallback = false) {
   return /^(1|true|yes|sim)$/i.test(String(value));
 }
 
+/**
+ * Caminho base quando o sistema não fica na raiz do domínio.
+ * '' (raiz) ou '/timesheet' — sempre com barra inicial e sem barra final.
+ */
+function normalizeBasePath(value) {
+  if (!value) return '';
+  const limpo = String(value).trim().replace(/\/+$/, '');
+  if (!limpo || limpo === '/') return '';
+  return limpo.startsWith('/') ? limpo : `/${limpo}`;
+}
+
 module.exports = {
   ROOT,
+  basePath: normalizeBasePath(process.env.BASE_PATH),
+  /**
+   * Endereço público pelo qual o navegador enxerga o sistema, quando ele difere
+   * do host que chega ao processo — caso de um proxy que troca o Host, como um
+   * Worker da Cloudflare. Ex.: https://azeredoeugatti.com.br
+   */
+  publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
   port: Number(process.env.PORT || 3000),
   host: process.env.HOST || '0.0.0.0',
   dbPath: !process.env.TIMESHEET_DB
