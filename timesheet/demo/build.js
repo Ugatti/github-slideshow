@@ -34,6 +34,28 @@ if (substituicoes !== 2) {
   throw new Error(`Esperava 2 chamadas de exportação CSV para adaptar, encontrei ${substituicoes}.`);
 }
 
+// O corpo de downloadFile é substituído em demo/demo-extras.js, então o
+// original vira código morto no pacote. Removê-lo evita que a plataforma
+// avise sobre um download que a página nunca vai executar.
+const SALVAR_ARQUIVO = `  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = nome;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+  return nome;`;
+if (!appDemo.includes(SALVAR_ARQUIVO)) {
+  throw new Error('Não encontrei o trecho de gravação em disco de downloadFile para remover.');
+}
+
+const appSemDownload = appDemo.replace(
+  SALVAR_ARQUIVO,
+  '  return nome;   // na demonstração, downloadFile é substituído por demo-extras.js'
+);
+
 const atalhosLogin = `
       <div class="demo-note">
         <strong>Demonstração</strong> — dados fictícios, nada é gravado.
@@ -91,7 +113,7 @@ ${corpoDemo}
 ${mockJs}
 </script>
 <script>
-${appDemo}
+${appSemDownload}
 </script>
 <script>
 ${extrasJs}
