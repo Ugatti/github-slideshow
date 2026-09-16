@@ -87,8 +87,13 @@ const destroySession = (token) =>
 const destroyUserSessions = (userId) =>
   db.run('DELETE FROM sessions WHERE user_id = ?', [userId]);
 
-const purgeExpiredSessions = () =>
+function purgeExpiredSessions() {
   db.run('DELETE FROM sessions WHERE expires_at < ?', [nowIso()]);
+  // As tentativas de login só interessam dentro da janela de bloqueio; sem esta
+  // limpeza a tabela cresce indefinidamente ao longo dos anos.
+  const cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  db.run('DELETE FROM login_attempts WHERE at < ?', [cutoff]);
+}
 
 /* --------------------------------------------------- proteção contra força bruta */
 

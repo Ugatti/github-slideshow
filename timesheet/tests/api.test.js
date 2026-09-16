@@ -378,3 +378,58 @@ test('usuário desativado perde o acesso imediatamente', async () => {
   assert.equal((await sessao.get('/api/auth/me')).status, 401);
   assert.equal((await sessao.login('temp@teste.com.br', 'TempSenha12345')).status, 401);
 });
+
+test('bloqueia a conta após sucessivas tentativas de senha errada', async () => {
+  const alvo = await master.post('/api/users', {
+    name: 'Alvo Bruteforce', email: 'alvo@teste.com.br', role: 'user', password: 'AlvoSenha12345',
+  });
+  assert.equal(alvo.status, 201);
+
+  const atacante = makeClient(server.base);
+  for (let i = 0; i < 8; i++) {
+    const res = await atacante.login('alvo@teste.com.br', `chute-errado-${i}`);
+    assert.equal(res.status, 401);
+  }
+  // a 9ª tentativa é barrada antes mesmo de conferir a senha
+  const bloqueado = await atacante.login('alvo@teste.com.br', 'AlvoSenha12345');
+  assert.equal(bloqueado.status, 429);
+  assert.match(bloqueado.body.error, /tentativas/i);
+});
+
+test('rejeita requisição de mutação vinda de outra origem', async () => {
+  const res = await fetch(`${server.base}/api/entries`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'https://site-malicioso.example',
+      cookie: ana.cookie,
+    },
+    body: JSON.stringify({
+      projectId: projectA, workDate: today(), duration: '1:00', description: 'CSRF.',
+    }),
+  });
+  assert.equal(res.status, 403);
+});
+
+test('recusa corpo que não seja JSON e payload gigante', async () => {
+  const semTipo = await fetch(`${server.base}/api/entries`, {
+    method: 'POST', headers: { cookie: ana.cookie, 'Content-Type': 'text/plain' }, body: 'x=1',
+  });
+  assert.equal(semTipo.status, 400);
+
+  const gigante = await fetch(`${server.base}/api/entries`, {
+    method: 'POST',
+    headers: { cookie: ana.cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ description: 'x'.repeat(300 * 1024) }),
+  });
+  assert.ok([400, 413].includes(gigante.status), `status inesperado: ${gigante.status}`);
+});
+
+test('não serve arquivos fora do diretório público', async () => {
+  for (const alvo of ['/../server/db.js', '/..%2fserver%2fdb.js', '/../.env']) {
+    const res = await fetch(server.base + alvo, { redirect: 'manual' });
+    assert.ok(res.status === 403 || res.status === 404, `${alvo} devolveu ${res.status}`);
+    const corpo = await res.text();
+    assert.ok(!corpo.includes('DatabaseSync'), `${alvo} vazou código-fonte`);
+  }
+});

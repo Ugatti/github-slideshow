@@ -3,7 +3,7 @@ const db = require('../db');
 const auth = require('../auth');
 const audit = require('../audit');
 const v = require('../validate');
-const { badRequest, unauthorized } = require('../errors');
+const { badRequest, unauthorized, HttpError } = require('../errors');
 const config = require('../config');
 
 // Hash descartável com custo real de scrypt, usado quando o e-mail não existe:
@@ -25,10 +25,7 @@ module.exports = function register(router) {
     const password = v.str(ctx.body.password, 'senha', { max: 200 });
 
     if (auth.isLockedOut(email)) {
-      throw new (require('../errors').HttpError)(
-        429,
-        `Muitas tentativas de login. Aguarde alguns minutos e tente novamente.`
-      );
+      throw new HttpError(429, 'Muitas tentativas de login. Aguarde alguns minutos e tente novamente.');
     }
 
     const row = db.one('SELECT * FROM users WHERE email = ?', [email]);

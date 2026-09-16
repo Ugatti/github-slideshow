@@ -102,6 +102,8 @@ reveal:
   maxScale: 1.5
 
 exclude: [
+  "timesheet",
+  "docs",
   "Gemfile",
   "Gemfile.lock",
   "vendor",

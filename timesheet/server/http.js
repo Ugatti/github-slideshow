@@ -5,6 +5,8 @@ const { HttpError, notFound, badRequest, unauthorized, forbidden } = require('./
 const auth = require('./auth');
 
 const MAX_BODY_BYTES = 256 * 1024;
+// Acima deste volume nem vale drenar para responder: a conexão é encerrada.
+const HARD_BODY_LIMIT = 8 * 1024 * 1024;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -77,16 +79,29 @@ function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let tooLarge = false;
+
     req.on('data', (chunk) => {
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
-        reject(new HttpError(413, 'Corpo da requisição muito grande.'));
-        req.destroy();
+        // Para de acumular (protege a memória), mas continua drenando para que
+        // o cliente consiga ler a resposta 413 — derrubar o socket aqui faria o
+        // navegador ver apenas "falha de rede", sem explicação.
+        tooLarge = true;
+        chunks.length = 0;
+        if (size > HARD_BODY_LIMIT) {
+          reject(new HttpError(413, 'Corpo da requisição muito grande.'));
+          req.destroy();
+        }
         return;
       }
       chunks.push(chunk);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
+
+    req.on('end', () => {
+      if (tooLarge) return reject(new HttpError(413, 'Corpo da requisição muito grande.'));
+      resolve(Buffer.concat(chunks));
+    });
     req.on('error', reject);
   });
 }

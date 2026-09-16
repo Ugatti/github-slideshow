@@ -2,7 +2,7 @@
 const db = require('../db');
 const audit = require('../audit');
 const v = require('../validate');
-const { notFound, conflict, badRequest } = require('../errors');
+const { notFound, conflict } = require('../errors');
 const { status } = require('../http');
 
 const shape = (r) => ({

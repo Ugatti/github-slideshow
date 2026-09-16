@@ -3,7 +3,7 @@ const { badRequest } = require('./errors');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const DURATION_RE = /^(\d{1,3})[:h](\d{1,2})m?$/i;   // 1:30, 1h30, 1h30m
+const DURATION_RE = /^(\d{1,3})[:h](\d{1,2})?m?$/i;  // 1:30, 1h30, 1h30m, 2h
 const DECIMAL_RE = /^\d{1,3}([.,]\d{1,2})?$/;        // 1,5  1.75  8
 
 function str(value, field, { required = true, max = 500, min = 1 } = {}) {
@@ -78,7 +78,7 @@ function duration(value, field = 'duração', { max = 1440 } = {}) {
 
   const hhmm = raw.match(DURATION_RE);
   if (hhmm) {
-    const mins = Number(hhmm[2]);
+    const mins = Number(hhmm[2] ?? 0);
     if (mins > 59) throw badRequest(`Minutos inválidos em "${raw}".`);
     minutes = Number(hhmm[1]) * 60 + mins;
   } else if (/^\d+$/.test(raw)) {
