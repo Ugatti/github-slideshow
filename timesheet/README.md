@@ -8,7 +8,19 @@ A avaliação das alternativas de mercado que levou a este desenvolvimento está
 [`../docs/AVALIACAO-MERCADO.md`](../docs/AVALIACAO-MERCADO.md); as decisões
 técnicas, em [`../docs/ARQUITETURA.md`](../docs/ARQUITETURA.md).
 
-## Requisitos
+## Ver funcionando sem instalar nada
+
+```bash
+npm run demo    # gera demo/timesheet-demo.html
+```
+
+Um arquivo HTML único que abre direto no navegador (duplo clique), com a
+interface real e um backend simulado em memória — inclusive as regras de
+permissão, para que dê para conferir que um profissional não enxerga as horas
+dos colegas. Dados fictícios; recarregar reinicia tudo. Serve para avaliar e
+para mostrar a sócios antes de instalar.
+
+## Requisitos para uso real
 
 **Node.js 22.5 ou superior** — e nada mais. O sistema não tem dependências de
 terceiros: usa `node:sqlite` para o banco, `node:crypto` para senhas e sessões e
@@ -38,6 +50,10 @@ senha uma única vez no terminal:
 
 Acesse `http://localhost:3000`, entre com essas credenciais e troque a senha em
 **Conta**. Depois, cadastre clientes, projetos e os profissionais do escritório.
+
+> **Se `npm start` reclamar da versão do Node**, atualize para a versão LTS mais
+> recente em <https://nodejs.org> e confira com `node --version`. O banco usa o
+> módulo `node:sqlite`, que só existe a partir do Node 22.5.
 
 ### Avaliar com dados de exemplo
 
@@ -108,7 +124,8 @@ evita a divergência de centavos que aparece ao somar valores já arredondados.
 ```bash
 npm start      # sobe o servidor (PORT, default 3000)
 npm test       # 42 testes (integração + unidade)
-npm run seed   # dados de demonstração
+npm run seed   # dados de demonstração no banco
+npm run demo   # gera o HTML único de demonstração
 ```
 
 ### Backup
@@ -177,6 +194,7 @@ timesheet/
 │   ├── app.js              montagem do app e bootstrap da conta master
 │   └── routes/             auth, users, clients, projects, entries, invoices, reports
 ├── public/                 interface (index.html, app.js, styles.css)
+├── demo/                   empacotador do HTML único + backend simulado
 ├── scripts/seed.js         dados de demonstração
 └── tests/                  42 testes (api.test.js + unit.test.js)
 ```

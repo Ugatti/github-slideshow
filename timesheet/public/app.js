@@ -43,6 +43,15 @@ const state = {
 
 const isMaster = () => state.user?.role === 'master';
 
+/**
+ * Cada navegação recebe um número. Uma resposta que chega depois de o usuário
+ * já ter trocado de aba não pode escrever na tela nova — sem esta guarda, a
+ * requisição lenta da aba anterior encontra um DOM que não é mais o seu e
+ * derruba a tela que acabou de abrir.
+ */
+let navToken = 0;
+const stillCurrent = (nav) => nav === navToken;
+
 /* ================================================================ formatação */
 
 const esc = (value) =>
@@ -383,7 +392,7 @@ function entryModal(entry, reload) {
 
 const views = {};
 
-views.lancar = async function lancar(root) {
+views.lancar = async function lancar(root, nav) {
   root.innerHTML = `
     <div class="page-head">
       <div>
@@ -503,6 +512,7 @@ views.lancar = async function lancar(root) {
   async function refreshToday() {
     const today = todayIso();
     const data = await API.get(`/api/entries?${qs({ from: today, to: today, limit: 50 })}`);
+    if (!stillCurrent(nav)) return;
     const own = isMaster() ? data.entries : data.entries.filter((e) => e.userId === state.user.id);
     root.querySelector('#today-list').innerHTML = entriesTable(own, { showUser: isMaster() });
     root.querySelector('#today-total').textContent =
@@ -644,7 +654,7 @@ function bindFilterBar(root, prefix, reload) {
 }
 
 function entriesView({ title, subtitle, prefix, showUser, showInvoiced }) {
-  return async function render(root) {
+  return async function render(root, nav) {
     root.innerHTML = `
       <div class="page-head">
         <div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div>
@@ -659,6 +669,7 @@ function entriesView({ title, subtitle, prefix, showUser, showInvoiced }) {
       const query = readFilters(root, prefix);
       try {
         const data = await API.get(`/api/entries?${query}&limit=500`);
+        if (!stillCurrent(nav)) return;
         root.querySelector(`#${prefix}-stats`).innerHTML = statsRow({
           ...data.totals, entries: data.totals.count,
         });
@@ -698,7 +709,7 @@ views.escritorio = entriesView({
 
 /* ======================================================== tela: relatórios */
 
-views.relatorios = async function relatorios(root) {
+views.relatorios = async function relatorios(root, nav) {
   const prefix = 'rel';
   root.innerHTML = `
     <div class="page-head">
@@ -730,6 +741,7 @@ views.relatorios = async function relatorios(root) {
     const query = readFilters(root, prefix);
     try {
       const data = await API.get(`/api/reports/summary?${query}&groupBy=${groupBy}`);
+      if (!stillCurrent(nav)) return;
       root.querySelector('#rel-stats').innerHTML = statsRow(data.totals);
       root.querySelector('#rel-title').textContent =
         `Consolidado por ${{ client: 'cliente', project: 'projeto', user: 'profissional', month: 'mês', date: 'dia' }[groupBy]}`;
@@ -786,7 +798,7 @@ function groupTable(groups, totals) {
 
 /* ====================================================== tela: nota fiscal */
 
-views.nota = async function nota(root) {
+views.nota = async function nota(root, nav) {
   const range = state.filters.nota || (state.filters.nota = monthRange(-1));
   root.innerHTML = `
     <div class="page-head no-print">
@@ -846,6 +858,7 @@ views.nota = async function nota(root) {
 
     try {
       const data = await API.get(`/api/reports/invoice?${qs({ clientId, from, to })}`);
+      if (!stillCurrent(nav)) return;
       state.lastReport = data;
       const detail = root.querySelector('#nf-detail').value === 'full';
       out.innerHTML = renderInvoiceReport(data, detail);
@@ -858,6 +871,7 @@ views.nota = async function nota(root) {
   async function loadInvoices() {
     try {
       const { invoices } = await API.get('/api/invoices');
+      if (!stillCurrent(nav)) return;
       const list = root.querySelector('#nf-invoice-list');
       list.innerHTML = invoices.length ? `
         <div class="table-wrap"><table>
@@ -1057,7 +1071,7 @@ function closePeriodModal(reload) {
 
 /* ============================================ tela: clientes e projetos */
 
-views.clientes = async function clientes(root) {
+views.clientes = async function clientes(root, nav) {
   root.innerHTML = `
     <div class="page-head">
       <div><h2>Clientes e projetos</h2>
@@ -1079,6 +1093,7 @@ views.clientes = async function clientes(root) {
     const [{ clients }, { projects }] = await Promise.all([
       API.get(`/api/clients${query}`), API.get(`/api/projects${query}`),
     ]);
+    if (!stillCurrent(nav)) return;
     state.clients = clients.filter((c) => c.active);
     state.projects = projects.filter((p) => p.active);
 
@@ -1260,7 +1275,7 @@ function projectModal(project, reload) {
 
 /* ========================================================= tela: usuários */
 
-views.usuarios = async function usuarios(root) {
+views.usuarios = async function usuarios(root, nav) {
   root.innerHTML = `
     <div class="page-head">
       <div><h2>Usuários</h2>
@@ -1272,6 +1287,7 @@ views.usuarios = async function usuarios(root) {
 
   async function reload() {
     const { users } = await API.get('/api/users');
+    if (!stillCurrent(nav)) return;
     state.users = users;
     root.querySelector('#user-list').innerHTML = `
       <div class="table-wrap"><table>
@@ -1417,7 +1433,7 @@ const ENTITY_LABEL = {
   user: 'usuário', invoice: 'fechamento',
 };
 
-views.auditoria = async function auditoria(root) {
+views.auditoria = async function auditoria(root, nav) {
   root.innerHTML = `
     <div class="page-head">
       <div><h2>Trilha de auditoria</h2>
@@ -1426,6 +1442,7 @@ views.auditoria = async function auditoria(root) {
     <div class="card"><div class="body flush" id="audit-list"><div class="empty">Carregando…</div></div></div>`;
 
   const { events } = await API.get('/api/reports/audit?limit=400');
+  if (!stillCurrent(nav)) return;
   root.querySelector('#audit-list').innerHTML = events.length ? `
     <div class="table-wrap"><table>
       <thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Registro</th><th>Detalhes</th></tr></thead>
@@ -1521,6 +1538,7 @@ async function loadReferenceData() {
 
 async function navigate(view) {
   if (!views[view]) view = 'lancar';
+  const nav = ++navToken;
   state.view = view;
   document.querySelectorAll('#tabs button').forEach((b) =>
     b.setAttribute('aria-selected', String(b.dataset.view === view)));
@@ -1529,9 +1547,10 @@ async function navigate(view) {
   const root = document.getElementById('view');
   root.innerHTML = '<div class="card"><div class="empty">Carregando…</div></div>';
   try {
-    await views[view](root);
+    await views[view](root, nav);
   } catch (err) {
     if (err.status === 401) return showLogin('Sua sessão expirou. Entre novamente.');
+    if (!stillCurrent(nav)) return;   // o usuário já saiu desta tela
     root.innerHTML = `<div class="alert error">${esc(err.message)}</div>`;
   }
 }

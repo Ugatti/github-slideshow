@@ -149,6 +149,18 @@ biblioteca de PDF. "Imprimir / PDF" usa o diálogo do navegador. Uma dependênci
 a menos, e o resultado é um PDF com texto selecionável e pesquisável, não uma
 imagem.
 
+## Versão demonstrativa
+
+`npm run demo` empacota `public/` mais um backend simulado (`demo/mock-api.js`)
+num HTML único que roda sem servidor. O simulado reimplementa as regras de
+permissão — não é uma casca com dados estáticos —, porque o que uma avaliação
+precisa verificar é justamente que o profissional não alcança as horas dos
+colegas.
+
+O empacotador falha de propósito se não encontrar as duas chamadas de
+exportação CSV que precisa adaptar: é melhor quebrar a geração do que publicar
+uma demonstração com um botão morto.
+
 ## Testes
 
 42 testes, com o peso deliberadamente concentrado na integração: 33 em

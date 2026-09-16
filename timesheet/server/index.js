@@ -1,4 +1,25 @@
 'use strict';
+
+// `node:sqlite` só existe a partir do Node 22.5. Sem esta checagem o sistema
+// morre com "Cannot find module 'node:sqlite'", que não diz o que fazer.
+const [major, minor] = process.versions.node.split('.').map(Number);
+if (major < 22 || (major === 22 && minor < 5)) {
+  console.error(`
+Node.js ${process.versions.node} é antigo demais para este sistema.
+
+  Necessário: Node.js 22.5 ou superior (o banco usa o módulo node:sqlite,
+              incluído no Node a partir dessa versão).
+
+  Para atualizar:
+    macOS    brew install node
+    Windows  https://nodejs.org  (baixe a versão LTS mais recente)
+    Linux    https://github.com/nodesource/distributions
+
+  Confira depois com: node --version
+`);
+  process.exit(1);
+}
+
 const config = require('./config');
 const db = require('./db');
 const auth = require('./auth');

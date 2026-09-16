@@ -4,12 +4,15 @@
   "private": true,
   "description": "Sistema proprietário de timesheet — Azeredo & Ugatti Advogados",
   "type": "commonjs",
-  "engines": { "node": ">=22.5.0" },
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
     "seed": "node scripts/seed.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "demo": "node demo/build.js"
   },
   "dependencies": {},
   "license": "UNLICENSED"
