@@ -25,13 +25,21 @@ const corpo = html
   .trim();
 
 // O botão de CSV usa location.href, que um ambiente publicado bloqueia.
+// A contagem sai da própria substituição: ter um segundo padrão só para
+// conferir já deixou o empacotador e a interface fora de sincronia uma vez.
+let substituicoes = 0;
 const appDemo = appJs.replace(
-  /window\.location\.href = (`\/api\/reports\/export\.csv\?[^`]*`);/g,
-  'window.__demoExport($1);'
+  /window\.location\.href = apiUrl\((`\/api\/reports\/export\.csv\?[^`]*`)\);/g,
+  (_, literal) => {
+    substituicoes++;
+    return `window.__demoExport(${literal});`;
+  }
 );
-const substituicoes = (appJs.match(/window\.location\.href = `\/api\/reports\/export\.csv/g) || []).length;
 if (substituicoes !== 2) {
-  throw new Error(`Esperava 2 chamadas de exportação CSV para adaptar, encontrei ${substituicoes}.`);
+  throw new Error(
+    `Esperava 2 chamadas de exportação CSV para adaptar, encontrei ${substituicoes}. ` +
+    'A interface mudou — ajuste o padrão em demo/build.js.'
+  );
 }
 
 // O corpo de downloadFile é substituído em demo/demo-extras.js, então o
